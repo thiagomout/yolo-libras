@@ -1,0 +1,29 @@
+{
+  "task": "classify",
+  "classes": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "I",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "Y"
+  ],
+  "imgsz": 224,
+  "exclude_j_z": true,
+  "source_zip": "archive.zip"
+}

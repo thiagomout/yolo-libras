@@ -1,0 +1,34 @@
+# Ambientes virtuais
+.venv/
+.venv*/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Dataset e arquivos compactados
+dataset/
+datasets/
+*.zip
+
+# Modelos e resultados de treinamento
+*.pt
+*.onnx
+runs/
+wandb/
+
+# Configurações locais
+.env
+.vscode/
+.idea/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+workspace/extraido/
+
+# Arquivos de trabalho e datasets
+workspace/
