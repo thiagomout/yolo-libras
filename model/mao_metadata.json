@@ -1,0 +1,87 @@
+{
+  "estatico": {
+    "classes": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "I",
+      "L",
+      "M",
+      "N",
+      "O",
+      "P",
+      "Q",
+      "R",
+      "S",
+      "T",
+      "U",
+      "V",
+      "W",
+      "Y"
+    ],
+    "metricas": {
+      "dataset_test": {
+        "acuracia": 0.9974,
+        "exemplos": 11234,
+        "por_letra": {
+          "A": 1.0,
+          "B": 1.0,
+          "C": 0.992,
+          "D": 1.0,
+          "E": 1.0,
+          "F": 1.0,
+          "G": 0.993,
+          "I": 1.0,
+          "L": 0.989,
+          "M": 1.0,
+          "N": 0.993,
+          "O": 0.985,
+          "P": 1.0,
+          "Q": 0.998,
+          "R": 0.993,
+          "S": 1.0,
+          "T": 1.0,
+          "U": 1.0,
+          "V": 1.0,
+          "W": 1.0,
+          "Y": 1.0
+        },
+        "confusoes": {
+          "G->R": 4,
+          "N->M": 3,
+          "O->C": 3,
+          "C->O": 2,
+          "L->B": 2,
+          "L->R": 2,
+          "L->Y": 2,
+          "O->P": 2,
+          "O->N": 2,
+          "R->A": 2
+        }
+      }
+    }
+  },
+  "dinamico": {
+    "classes": [],
+    "metricas": {}
+  },
+  "pessoas": [],
+  "pessoa_teste": null,
+  "config": {
+    "sequence_length": 32,
+    "motion": {
+      "start": 1.5,
+      "still": 0.2,
+      "window": 0.1,
+      "pre_roll": 0.15,
+      "min_duration": 0.25,
+      "max_duration": 3.0
+    },
+    "nothing_label": "NADA"
+  },
+  "seed": 42
+}

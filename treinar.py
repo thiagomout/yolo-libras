@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import re
 import shutil
 import sys
 import zipfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -139,6 +140,25 @@ def prepare_detection_yaml(
         excluded_ids = {i for i, name in enumerate(names) if name.strip().upper() in {"J", "Z"}}
 
     if excluded_ids:
+        # Trabalha numa cópia independente dos rótulos; a extração original é reutilizável.
+        original_root = extracted_root
+        copy_key = hashlib.sha256(str(original_root.resolve()).encode()).hexdigest()[:12]
+        filtered_root = WORK_DIR / f"deteccao_estatica_{copy_key}"
+        filtered_yaml = filtered_root / "data_filtrado.yaml"
+        if filtered_yaml.is_file():
+            cached = yaml.safe_load(filtered_yaml.read_text(encoding="utf-8"))
+            return filtered_yaml, names_to_list(cached["names"])
+        if filtered_root.exists():
+            raise ValueError(f"Preparação incompleta em {filtered_root}; use uma nova pasta de origem.")
+        try:
+            train_relative = train_path.relative_to(original_root.resolve())
+            val_relative = val_path.relative_to(original_root.resolve())
+        except ValueError as exc:
+            raise ValueError("Para excluir classes, os splits devem estar dentro da pasta do dataset.") from exc
+        shutil.copytree(original_root, filtered_root)
+        extracted_root = filtered_root
+        train_path = filtered_root.resolve() / train_relative
+        val_path = filtered_root.resolve() / val_relative
         kept_old_ids = [i for i in range(len(names)) if i not in excluded_ids]
         remap = {old: new for new, old in enumerate(kept_old_ids)}
         # Edita apenas arquivos .txt dentro de pastas chamadas labels.
@@ -180,10 +200,14 @@ def prepare_detection_yaml(
     if data.get("test"):
         test_path = resolve_existing_path(data.get("test"), root_hint, yaml_path.parent)
         if test_path is not None:
+            if excluded_ids:
+                test_path = extracted_root.resolve() / test_path.relative_to(original_root.resolve())
             new_data["test"] = str(test_path)
 
     prepared_yaml = WORK_DIR / "data_preparado.yaml"
     prepared_yaml.write_text(yaml.safe_dump(new_data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    if excluded_ids:
+        filtered_yaml.write_text(yaml.safe_dump(new_data, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return prepared_yaml, names
 
 
@@ -205,7 +229,7 @@ def find_class_parent(extracted_root: Path) -> Path | None:
     """Encontra pastas em que cada subpasta representa uma classe e contém imagens."""
     candidates: list[tuple[int, int, int, Path]] = []
     ignored_names = {".git", "__macosx", "images", "labels", "annotations"}
-    for parent in extracted_root.rglob("*"):
+    for parent in [extracted_root, *extracted_root.rglob("*")]:
         if not parent.is_dir() or parent.name.lower() in ignored_names:
             continue
         subdirs = [d for d in parent.iterdir() if d.is_dir() and d.name.lower() not in ignored_names]
@@ -231,9 +255,28 @@ def prepare_classification_dataset(
     val_fraction: float = 0.15,
     seed: int = 42,
 ) -> list[str]:
+    if output_dir.resolve() == class_parent.resolve() or output_dir.resolve() in class_parent.resolve().parents or class_parent.resolve() in output_dir.resolve().parents:
+        raise ValueError("As pastas de origem e saída não podem conter uma à outra.")
+    source_paths = sorted(p for p in class_parent.rglob("*") if is_image(p))
+    test_source = class_parent.parent / "test"
+    if test_source.is_dir() and test_source != class_parent:
+        source_paths += sorted(p for p in test_source.rglob("*") if is_image(p))
+    identity = [(str(p.resolve()), p.stat().st_size, p.stat().st_mtime_ns) for p in source_paths]
+    signature = hashlib.sha256(json.dumps([identity, exclude_motion, val_fraction, seed]).encode()).hexdigest()
+    manifest_path = output_dir / "split_manifest.json"
+    if manifest_path.is_file():
+        previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if previous.get("signature") == signature and all((output_dir / row["target"]).is_file() for row in previous["files"]):
+            print(f"Reutilizando dataset preparado: {output_dir}")
+            return sorted(previous["counts"]["train"])
     if output_dir.exists():
-        shutil.rmtree(output_dir)
+        raise ValueError(f"Saída existente e diferente da preparação solicitada: {output_dir}. Use outra pasta de saída.")
+    if not 0 < val_fraction < 1:
+        raise ValueError("A fração de validação deve estar entre 0 e 1.")
     rng = random.Random(seed)
+    seen_hashes: dict[str, str] = {}
+    duplicate_count = 0
+    manifest = []
     classes: dict[str, list[Path]] = defaultdict(list)
     for class_dir in sorted(d for d in class_parent.iterdir() if d.is_dir()):
         letter = class_name_from_folder(class_dir.name)
@@ -243,6 +286,13 @@ def prepare_classification_dataset(
             continue
         for image_path in sorted(class_dir.iterdir()):
             if is_image(image_path):
+                digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
+                if digest in seen_hashes:
+                    if seen_hashes[digest] != letter:
+                        raise ValueError(f"Imagem idêntica com rótulos diferentes: {image_path}")
+                    duplicate_count += 1
+                    continue
+                seen_hashes[digest] = letter
                 classes[letter].append(image_path)
 
     classes = {label: files for label, files in classes.items() if files}
@@ -278,7 +328,41 @@ def prepare_classification_dataset(
             target_dir = output_dir / split / label
             for index, source in enumerate(split_files):
                 target = target_dir / f"{label}_{index:06d}{source.suffix.lower()}"
-                shutil.copy2(source, target)
+                try:
+                    target.hardlink_to(source)
+                except OSError:
+                    shutil.copy2(source, target)
+                manifest.append({"split": split, "class": label, "source": str(source), "target": str(target.relative_to(output_dir))})
+
+    # Preserva o teste do ZIP: ele não participa do treino nem da seleção do melhor modelo.
+    test_parent = class_parent.parent / "test"
+    if test_parent.is_dir() and test_parent != class_parent:
+        for label in sorted(classes):
+            target_dir = output_dir / "test" / label
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for source in sorted((test_parent / label).glob("*")):
+                if not is_image(source):
+                    continue
+                digest = hashlib.sha256(source.read_bytes()).hexdigest()
+                if digest in seen_hashes:
+                    if seen_hashes[digest] != label:
+                        raise ValueError(f"Imagem idêntica com rótulos diferentes: {source}")
+                    duplicate_count += 1
+                    continue
+                seen_hashes[digest] = label
+                target = target_dir / source.name
+                try:
+                    target.hardlink_to(source)
+                except OSError:
+                    shutil.copy2(source, target)
+                manifest.append({"split": "test", "class": label, "source": str(source), "target": str(target.relative_to(output_dir))})
+    split_counts = Counter((row["split"], row["class"]) for row in manifest)
+    report = {"signature": signature, "seed": seed, "val_fraction": val_fraction, "duplicates_removed": duplicate_count,
+              "counts": {split: {label: split_counts[split, label]
+                                  for label in sorted(classes)} for split in ("train", "val", "test")},
+              "files": manifest}
+    (output_dir / "split_manifest.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Imagens idênticas removidas: {duplicate_count}. Divisão registrada em split_manifest.json.")
     return sorted(classes)
 
 
@@ -286,34 +370,50 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Treina um YOLO para reconhecer letras estáticas de Libras a partir de um ZIP."
     )
-    parser.add_argument("--zip", default="dataset.zip", help="Caminho do ZIP com o dataset (padrão: dataset.zip).")
+    parser.add_argument("--zip", default="data/archive.zip", help="Caminho do ZIP com o dataset (padrão: data/archive.zip).")
     parser.add_argument("--epochs", type=int, default=50, help="Número de épocas (padrão: 50).")
     parser.add_argument("--batch", type=int, default=16, help="Tamanho do batch (padrão: 16).")
     parser.add_argument("--include-j-z", action="store_true", help="Mantém J e Z, apesar de envolverem movimento.")
     parser.add_argument("--imgsz", type=int, default=None, help="Tamanho da imagem; padrão 224 para classificação e 640 para detecção.")
+    parser.add_argument("--dataset", help="Pasta já extraída; dispensa ZIP e extração.")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--val-fraction", type=float, default=0.15)
+    parser.add_argument("--device", default=None, help="cpu, 0 (GPU), etc.")
+    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--model", help="Pesos pré-treinados alternativos.")
+    parser.add_argument("--prepare-only", action="store_true", help="Prepara e audita o dataset sem treinar.")
     args = parser.parse_args()
 
     zip_path = Path(args.zip).expanduser().resolve()
-    if not zip_path.is_file():
-        print(f"Não encontrei o ZIP: {zip_path}")
-        print("Coloque o arquivo na pasta deste projeto ou informe o caminho: python treinar.py --zip caminho\\dataset.zip")
+    if args.epochs < 1 or args.batch < 1 or (args.imgsz is not None and args.imgsz < 32) or args.workers < 0 or not 0 < args.val_fraction < 1:
+        print("Épocas/batch devem ser positivos, imgsz >= 32, workers >= 0 e val-fraction entre 0 e 1.")
         return 2
-    if args.epochs < 1 or args.batch < 1:
-        print("--epochs e --batch precisam ser maiores que zero.")
-        return 2
-
-    if WORK_DIR.exists():
-        shutil.rmtree(WORK_DIR)
     WORK_DIR.mkdir(parents=True, exist_ok=True)
-    extracted_root = WORK_DIR / "extraido"
-    extracted_root.mkdir(parents=True, exist_ok=True)
-
-    try:
-        print(f"Extraindo {zip_path.name}...")
-        safe_extract_zip(zip_path, extracted_root)
-    except (zipfile.BadZipFile, OSError, ValueError) as exc:
-        print(f"Erro ao extrair o ZIP: {exc}")
-        return 2
+    if args.dataset:
+        extracted_root = Path(args.dataset).expanduser().resolve()
+        if not extracted_root.is_dir():
+            print(f"Pasta não encontrada: {extracted_root}")
+            return 2
+    else:
+        if not zip_path.is_file():
+            print(f"ZIP não encontrado: {zip_path}. Use --zip ou --dataset.")
+            return 2
+        # O nome inclui a identidade do ZIP; uma extração concluída é reutilizada.
+        stat = zip_path.stat()
+        fingerprint = hashlib.sha256(f"{zip_path}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:12]
+        extracted_root = WORK_DIR / f"extraido_{fingerprint}"
+        marker = extracted_root / ".extraction_complete"
+        if marker.is_file():
+            print(f"Reutilizando extração: {extracted_root}")
+        else:
+            extracted_root.mkdir(parents=True, exist_ok=True)
+            try:
+                print(f"Extraindo {zip_path.name} (uma única vez)...")
+                safe_extract_zip(zip_path, extracted_root)
+                marker.touch()
+            except (zipfile.BadZipFile, OSError, ValueError) as exc:
+                print(f"Erro ao extrair: {exc}")
+                return 2
 
     try:
         from ultralytics import YOLO
@@ -333,7 +433,10 @@ def main() -> int:
                 extracted_root, yaml_path, yaml_data, exclude_motion=exclude_motion
             )
             image_size = args.imgsz or 640
-            model = YOLO("yolo26n.pt")
+            if args.prepare_only:
+                print(f"Dataset preparado: {prepared_yaml}")
+                return 0
+            model = YOLO(args.model or "yolo26n.pt")
             model.train(
                 data=str(prepared_yaml),
                 epochs=args.epochs,
@@ -341,7 +444,11 @@ def main() -> int:
                 batch=args.batch,
                 project=str(PROJECT_DIR / "runs"),
                 name="libras_deteccao",
-                workers=4,
+                workers=args.workers,
+                seed=args.seed,
+                device=args.device,
+                patience=15,
+                cos_lr=True,
                 plots=True,
             )
             task = "detect"
@@ -354,12 +461,17 @@ def main() -> int:
                     "Anexe o ZIP à conversa para eu adaptar o preparador ao formato real do seu dataset."
                 )
                 return 2
-            class_dataset = WORK_DIR / "dataset_classificacao"
+            dataset_key = hashlib.sha256(f"{class_parent.resolve()}:{args.seed}:{args.val_fraction}:{exclude_motion}".encode()).hexdigest()[:12]
+            class_dataset = WORK_DIR / f"dataset_classificacao_{dataset_key}"
             classes = prepare_classification_dataset(
-                class_parent, class_dataset, exclude_motion=exclude_motion
+                class_parent, class_dataset, exclude_motion=exclude_motion, val_fraction=args.val_fraction, seed=args.seed
             )
             image_size = args.imgsz or 224
-            model = YOLO("yolo26n-cls.pt")
+            if args.prepare_only:
+                print(f"Dataset preparado: {class_dataset}")
+                return 0
+            from classificacao import FullImageTrainer, FullImageValidator
+            model = YOLO(args.model or "yolo26n-cls.pt")
             model.train(
                 data=str(class_dataset),
                 epochs=args.epochs,
@@ -367,7 +479,16 @@ def main() -> int:
                 batch=args.batch,
                 project=str(PROJECT_DIR / "runs"),
                 name="libras_classificacao",
-                workers=4,
+                trainer=FullImageTrainer,
+                auto_augment=None,
+                erasing=0.0,
+                fliplr=0.0,
+                scale=0.0,
+                workers=args.workers,
+                seed=args.seed,
+                device=args.device,
+                patience=15,
+                cos_lr=True,
                 plots=True,
             )
             task = "classify"
@@ -380,6 +501,15 @@ def main() -> int:
         if not best.is_file():
             raise FileNotFoundError(f"Treino terminou, mas não encontrei os pesos best.pt em {best}")
 
+        test_metrics = None
+        if task == "classify" and (class_dataset / "test").is_dir():
+            test_counts = [sum(1 for p in (class_dataset / "test" / label).glob("*") if is_image(p)) for label in classes]
+            if all(test_counts):
+                evaluation = YOLO(str(best)).val(data=str(class_dataset), split="test", imgsz=image_size,
+                                                device=args.device, workers=args.workers, validator=FullImageValidator)
+                test_metrics = evaluation.results_dict
+            else:
+                print("Teste incompleto após deduplicação; avaliação de teste ignorada.")
         target_model = MODEL_DIR / "best.pt"
         shutil.copy2(best, target_model)
         metadata = {
@@ -387,7 +517,11 @@ def main() -> int:
             "classes": classes,
             "imgsz": image_size,
             "exclude_j_z": exclude_motion,
-            "source_zip": zip_path.name,
+            "source_zip": None if args.dataset else zip_path.name,
+            "source_dataset": str(extracted_root),
+            "seed": args.seed,
+            "preprocessing": "resize_full_image" if task == "classify" else "default",
+            "test_metrics": test_metrics,
         }
         (MODEL_DIR / "metadata.json").write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"

@@ -1,4 +1,6 @@
-ultralytics>=8.3.0
+ultralytics==8.4.175
 opencv-python>=4.8.0
 pyttsx3>=2.90
 PyYAML>=6.0
+mediapipe>=0.10.14
+numpy
