@@ -1,34 +1,33 @@
 # Guia de coleta para o grupo
 
-Cada pessoa grava os sinais pela própria webcam. Só os **pontos da mão** são salvos (21 pontos por quadro), nunca imagem ou vídeo. As gravações vão para uma pasta compartilhada no Google Drive; o Git guarda só o código e o modelo treinado.
+Cada pessoa grava os sinais pela própria webcam. Só os **pontos da mão** são salvos (21 pontos por quadro, com posição e tamanho normalizados), nunca imagem ou vídeo. As gravações ficam em `coleta/` e vão para o Git junto com o código, então o repositório também é o dataset.
+
+**Consentimento:** o repositório é público. Grave só se você concordar que seus pontos da mão fiquem públicos, e use um apelido, nunca o nome completo. Depois de enviado, um arquivo continua no histórico do Git mesmo se for apagado.
 
 ## 1. Preparar (uma vez)
 
-**Pasta do Drive.** Quem organiza cria a pasta `Libras-coleta` no próprio Drive e compartilha com o grupo como **Editor**. Quem recebeu abre o Drive no navegador, vai em *Compartilhados comigo*, clica com o botão direito na pasta → *Organizar* → *Adicionar atalho* → *Meu Drive*. Sem o atalho, a pasta não aparece no computador.
-
-**Google Drive para computador.** Instale ([google.com/drive/download](https://www.google.com/drive/download/)) e entre na conta. A pasta aparece no Explorador de Arquivos, normalmente em `G:\Meu Drive\Libras-coleta` (em inglês: `G:\My Drive\Libras-coleta`). Confira a letra e o nome no Explorador.
-
-**Python e projeto.** Instale o Python 3.12 para Windows ([python.org](https://www.python.org/downloads/)), marcando *Add python.exe to PATH*, e o Git. Depois, no PowerShell:
+1. Instale o Python 3.12 para Windows ([python.org](https://www.python.org/downloads/)), marcando *Add python.exe to PATH*, e o [Git](https://git-scm.com/download/win).
+2. Peça para ser adicionado como colaborador no GitHub e aceite o convite que chega por e-mail. Sem isso, o `git push` é recusado.
+3. No PowerShell:
 
 ```powershell
 cd $HOME\Documents
 git clone https://github.com/thiagomout/yolo-libras.git
 cd yolo-libras
+powershell -ExecutionPolicy Bypass -File .\iniciar_windows.ps1
 ```
 
-**Dizer onde fica a pasta**, uma vez só (troque pelo caminho que você conferiu acima):
-
-```powershell
-setx LIBRAS_COLETA "G:\Meu Drive\Libras-coleta"
-```
-
-Feche e abra o PowerShell de novo para a variável valer. Todos os scripts passam a gravar e ler nessa pasta.
-
-**Testar.** `powershell -ExecutionPolicy Bypass -File .\iniciar_windows.ps1` abre o reconhecimento. Na primeira vez instala as dependências (precisa de internet, alguns minutos).
+O último comando abre o reconhecimento. Na primeira vez instala as dependências (precisa de internet, alguns minutos). Feche com Q.
 
 ## 2. Gravar
 
-Use **sempre o mesmo apelido** em `--pessoa` (minúsculo, sem espaço, sem nome completo). É ele que permite testar o modelo com uma pessoa que ficou de fora do treino.
+Antes de cada sessão, pegue as novidades (modelo novo, gravações dos outros):
+
+```powershell
+git pull
+```
+
+Use **sempre o mesmo apelido** em `--pessoa` (minúsculo, sem espaço). É ele que permite testar o modelo com uma pessoa que ficou de fora do treino.
 
 Letras com movimento e a classe NADA (`CC` = Ç):
 
@@ -41,8 +40,6 @@ Letras estáticas:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\iniciar_windows.ps1 coletar.py --pessoa apelido --tipo estatico --letras A B C D E F G I L M N O P Q R S T U V W Y
 ```
-
-O terminal mostra `Gravando em: ...`. Confira se é a pasta do Drive.
 
 | Tecla | Ação |
 |---|---|
@@ -59,7 +56,7 @@ O terminal mostra `Gravando em: ...`. Confira se é a pasta do Drive.
 | Cada letra com movimento (H, J, K, X, Z, Ç) | 30 |
 | NADA | 40 |
 
-Dá para dividir em várias sessões; as gravações se somam. Para ver o que falta (de todo mundo):
+Dá para dividir em várias sessões; as gravações se somam. Para ver o que falta (de todo mundo que já enviou):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\iniciar_windows.ps1 resumo_coleta.py
@@ -72,28 +69,36 @@ powershell -ExecutionPolicy Bypass -File .\iniciar_windows.ps1 resumo_coleta.py
 - **Estáticas:** durante os 2 s, mova e gire **levemente** a mão e mude um pouco a distância, mantendo a letra correta.
 - **Varie entre as sessões:** perto e longe da câmera, luz de dia e de lâmpada, fundos diferentes, velocidade normal e mais lenta. Se puder, grave parte com a outra mão.
 - **Errou? Aperte D na hora.** Um exemplo errado atrapalha mais do que um exemplo a menos.
-- Não renomeie, mova ou edite arquivos na pasta do Drive. Os nomes já são únicos por pessoa e horário.
+- Não renomeie nem edite arquivos de `coleta/`, nem os seus nem os dos outros.
 
-## 3. Treinar (quem organiza)
+## 3. Enviar
 
-No Windows, usando a mesma pasta do Drive:
+Ao fim de cada sessão:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\iniciar_windows.ps1 treinar_landmarks.py --por-pessoa
+git add coleta
+git commit -m "Coleta de apelido"
+git pull --rebase
+git push
 ```
 
-Ou no WSL, com GPU, montando o drive do Google (`G:`) uma vez por sessão:
+O `git pull --rebase` junta o que os outros enviaram enquanto você gravava. Como cada arquivo tem o apelido e o horário no nome, não há conflito. Envie **só** a pasta `coleta`: se `git status` mostrar outros arquivos alterados, não os inclua.
+
+## 4. Treinar (quem organiza)
+
+No WSL, na pasta do projeto:
 
 ```bash
-sudo mkdir -p /mnt/g && sudo mount -t drvfs G: /mnt/g
-LIBRAS_COLETA="/mnt/g/Meu Drive/Libras-coleta" python treinar_landmarks.py --por-pessoa
+git pull
+python resumo_coleta.py
+python treinar_landmarks.py --por-pessoa
 ```
 
 `--por-pessoa` treina uma vez para cada pessoa deixando-a de fora e mostra a acurácia dela, que é a melhor estimativa de como o modelo se sai com alguém novo. Depois treina o modelo final com todo mundo. Se uma pessoa vai bem pior que as outras, vale olhar como ela faz os sinais ou gravar mais com ela.
 
-Para treinar no Windows, o modelo estático precisa dos pontos do dataset original (`workspace/landmarks_extraido.npz`), que não vão para o Git. Rode a partir da pasta do projeto no WSL (`\\wsl.localhost\...`) ou copie esse arquivo.
+O modelo estático também usa os pontos do dataset original (`workspace/landmarks_extraido.npz`, gerado por `extrair_landmarks.py`), que não vai para o Git.
 
-Por fim, publique o modelo para o grupo:
+Publique o modelo para o grupo:
 
 ```bash
 git add model/mao.pt model/mao_metadata.json

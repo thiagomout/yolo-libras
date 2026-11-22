@@ -15,7 +15,7 @@ import numpy as np
 
 PROJECT_DIR = Path(__file__).resolve().parent
 HAND_MODEL = PROJECT_DIR / "model" / "hand_landmarker.task"
-# Pasta das gravações. Defina LIBRAS_COLETA para usar uma pasta compartilhada (ex.: no Google Drive).
+# Pasta das gravações (vai no Git). LIBRAS_COLETA permite usar outra pasta, se precisar.
 COLLECTION_DIR = Path(os.environ.get("LIBRAS_COLETA") or PROJECT_DIR / "coleta").expanduser()
 HAND_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"

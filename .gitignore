@@ -33,8 +33,7 @@ workspace/extraido/
 # Arquivos de trabalho e datasets
 workspace/
 
-# Gravações ficam no Google Drive (ver COLETA.md); modelo do MediaPipe é baixado sozinho
-coleta/
+# Modelo do MediaPipe é baixado sozinho. As gravações de coleta/ vão no Git (ver COLETA.md).
 *.task
 # Exceção: o modelo de pontos é pequeno e vai no Git para o grupo usar sem treinar.
 !model/mao.pt

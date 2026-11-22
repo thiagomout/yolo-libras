@@ -22,7 +22,7 @@ def count(folder: Path) -> Counter:
     counts: Counter = Counter()
     for path in folder.glob("*/*/*.npz"):
         match = FILENAME.match(path.stem)
-        if match:  # ignora cópias de conflito do Drive ("arquivo (1).npz") e arquivos estranhos
+        if match:  # ignora cópias ("arquivo (1).npz") e arquivos estranhos
             counts[(path.parent.parent.name, path.parent.name, match["person"])] += 1
     return counts
 

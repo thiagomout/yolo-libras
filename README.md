@@ -19,9 +19,9 @@ Gera `workspace/landmarks_extraido.npz` e um relatório `.json` com a taxa de de
 
 ### 2. Gravar exemplos pela webcam (Windows)
 
-> **Coleta em grupo:** veja [COLETA.md](COLETA.md) (pasta compartilhada no Google Drive, metas por pessoa, `resumo_coleta.py` e `treinar_landmarks.py --por-pessoa`).
+> **Coleta em grupo:** veja [COLETA.md](COLETA.md) (gravações enviadas pelo Git, metas por pessoa, `resumo_coleta.py` e `treinar_landmarks.py --por-pessoa`).
 
-O dataset não tem nenhuma letra com movimento; elas precisam ser gravadas. Só os pontos são salvos (em `coleta/`), nunca a imagem.
+O dataset não tem nenhuma letra com movimento; elas precisam ser gravadas. Só os pontos são salvos (em `coleta/`, que vai para o Git), nunca a imagem.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\iniciar_windows.ps1 coletar.py --pessoa ana --letras H J K X Z CC NADA

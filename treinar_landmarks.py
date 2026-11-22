@@ -29,7 +29,7 @@ MOTION_CONFIG = {"start": 1.5, "still": 0.2, "window": 0.1, "pre_roll": 0.15, "m
 
 
 def load_recordings(folder: Path) -> list[dict]:
-    """Lê as gravações; arquivos corrompidos ou ainda sincronizando (Drive) são ignorados com aviso."""
+    """Lê as gravações; arquivos corrompidos ou incompletos são ignorados com aviso."""
     recordings = []
     for path in sorted(folder.glob("*/*.npz")):
         try:
